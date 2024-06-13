@@ -14,26 +14,19 @@ namespace ClientServerGame
         private TcpListener server;
         private Thread serverThread;
         private bool isRunning = false;
-        private List<TcpClient> waitingClients = new List<TcpClient>();
+        private List<TcpClient> clients = new List<TcpClient>();
         private readonly object lockObj = new object();
+        private char[,] board = new char[3, 3];
+        private TcpClient player1;
+        private TcpClient player2;
+        private TcpClient currentPlayer;
 
         public ServerWindow(string ipAddress, int port)
         {
             InitializeComponent();
             IPTextBlock.Text = ipAddress;
             PortTextBlock.Text = port.ToString();
-        }
-
-        private void StartStopButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (isRunning)
-            {
-                StopServer();
-            }
-            else
-            {
-                StartServer();
-            }
+            StartServer();
         }
 
         private void StartServer()
@@ -48,7 +41,6 @@ namespace ClientServerGame
             serverThread.Start();
 
             isRunning = true;
-            StartStopButton.Content = "Stop Server";
             LogMessage("Server started...");
         }
 
@@ -58,49 +50,77 @@ namespace ClientServerGame
             {
                 isRunning = false;
                 server.Stop();
+                foreach (var client in clients)
+                {
+                    client.Close();
+                }
+                clients.Clear();
             }
             if (serverThread != null && serverThread.IsAlive)
             {
                 serverThread.Join();
             }
-            StartStopButton.Content = "Start Server";
             LogMessage("Server stopped...");
         }
 
-        // Główna pętla serwera
         private void ServerLoop()
         {
             try
             {
                 while (true)
                 {
+                    TcpClient client = null;
                     lock (lockObj)
                     {
                         if (!isRunning)
                         {
                             break;
                         }
+
+                        if (server.Pending())
+                        {
+                            client = server.AcceptTcpClient();
+                        }
                     }
 
-                    TcpClient client = server.AcceptTcpClient();
-                    LogMessage("Client connected...");
-
-                    lock (lockObj)
+                    if (client != null)
                     {
-                        if (waitingClients.Count > 0)
+                        lock (lockObj)
                         {
-                            TcpClient waitingClient = waitingClients[0];
-                            waitingClients.RemoveAt(0);
-                            Thread clientThread = new Thread(() => HandleClientPair(waitingClient, client)) { IsBackground = true };
-                            clientThread.Start();
-                        }
-                        else
-                        {
-                            waitingClients.Add(client);
-                            Thread clientThread = new Thread(() => HandleWaitingClient(client)) { IsBackground = true };
-                            clientThread.Start();
+                            if (clients.Count >= 2)
+                            {
+                                client.Close();
+                                continue;
+                            }
+
+                            clients.Add(client);
+                            LogMessage("Client connected...");
+
+                            if (clients.Count == 2)
+                            {
+                                player1 = clients[0];
+                                player2 = clients[1];
+                                currentPlayer = player1;
+                                StartGame();
+                            }
+                            else
+                            {
+                                Thread clientThread = new Thread(() => HandleWaitingClient(client)) { IsBackground = true };
+                                clientThread.Start();
+                            }
                         }
                     }
+                    else
+                    {
+                        Thread.Sleep(100);
+                    }
+                }
+            }
+            catch (SocketException ex)
+            {
+                if (isRunning)
+                {
+                    LogMessage($"SocketException: {ex.Message}");
                 }
             }
             catch (Exception ex)
@@ -109,7 +129,19 @@ namespace ClientServerGame
             }
         }
 
-        // Obsługa oczekującego klienta
+        private void StartGame()
+        {
+            Thread player1Thread = new Thread(() => HandleClient(player1, 'X')) { IsBackground = true };
+            Thread player2Thread = new Thread(() => HandleClient(player2, 'O')) { IsBackground = true };
+            player1Thread.Start();
+            player2Thread.Start();
+
+            SendAssignMessage(player1, 'X');
+            SendAssignMessage(player2, 'O');
+
+            LogMessage("Game started between two players.");
+        }
+
         private void HandleWaitingClient(TcpClient client)
         {
             try
@@ -126,25 +158,58 @@ namespace ClientServerGame
             }
         }
 
-        // Obsługa pary klientów
-        private void HandleClientPair(TcpClient client1, TcpClient client2)
+        private void HandleClient(TcpClient client, char symbol)
         {
             try
             {
-                NetworkStream stream1 = client1.GetStream();
-                NetworkStream stream2 = client2.GetStream();
+                NetworkStream stream = client.GetStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead;
 
-                var message = new { type = "info", content = "Paired with another player. Start playing!" };
-                string jsonMessage = JsonConvert.SerializeObject(message);
-                byte[] buffer1 = Encoding.ASCII.GetBytes(jsonMessage + "\n");
-                stream1.Write(buffer1, 0, buffer1.Length);
-                byte[] buffer2 = Encoding.ASCII.GetBytes(jsonMessage + "\n");
-                stream2.Write(buffer2, 0, buffer2.Length);
+                while (true)
+                {
+                    bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead == 0)
+                    {
+                        break;
+                    }
 
-                Thread thread1 = new Thread(() => RelayMessages(client1, client2)) { IsBackground = true };
-                Thread thread2 = new Thread(() => RelayMessages(client2, client1)) { IsBackground = true };
-                thread1.Start();
-                thread2.Start();
+                    string jsonMessage = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                    var message = JsonConvert.DeserializeObject<dynamic>(jsonMessage);
+
+                    if (message.type == "move")
+                    {
+                        int row = message.row;
+                        int column = message.column;
+
+                        lock (lockObj)
+                        {
+                            if (client == currentPlayer && board[row, column] == '\0')
+                            {
+                                board[row, column] = symbol;
+                                SendMoveMessage(player1, row, column, symbol);
+                                SendMoveMessage(player2, row, column, symbol);
+
+                                if (CheckWin(symbol))
+                                {
+                                    SendInfoMessage(player1, $"Player {symbol} wins!");
+                                    SendInfoMessage(player2, $"Player {symbol} wins!");
+                                    ResetGame();
+                                }
+                                else if (CheckDraw())
+                                {
+                                    SendInfoMessage(player1, "It's a draw!");
+                                    SendInfoMessage(player2, "It's a draw!");
+                                    ResetGame();
+                                }
+                                else
+                                {
+                                    currentPlayer = currentPlayer == player1 ? player2 : player1;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -152,30 +217,70 @@ namespace ClientServerGame
             }
         }
 
-        private void RelayMessages(TcpClient fromClient, TcpClient toClient)
+        private void SendAssignMessage(TcpClient client, char symbol)
         {
-            try
-            {
-                NetworkStream fromStream = fromClient.GetStream();
-                NetworkStream toStream = toClient.GetStream();
-                byte[] buffer = new byte[1024];
-                int bytesRead;
+            NetworkStream stream = client.GetStream();
+            var message = new { type = "assign", symbol = symbol };
+            string jsonMessage = JsonConvert.SerializeObject(message);
+            byte[] buffer = Encoding.ASCII.GetBytes(jsonMessage + "\n");
+            stream.Write(buffer, 0, buffer.Length);
+        }
 
-                while ((bytesRead = fromStream.Read(buffer, 0, buffer.Length)) != 0)
+        private void SendMoveMessage(TcpClient client, int row, int column, char symbol)
+        {
+            NetworkStream stream = client.GetStream();
+            var message = new { type = "move", row = row, column = column, symbol = symbol };
+            string jsonMessage = JsonConvert.SerializeObject(message);
+            byte[] buffer = Encoding.ASCII.GetBytes(jsonMessage + "\n");
+            stream.Write(buffer, 0, buffer.Length);
+        }
+
+        private void SendInfoMessage(TcpClient client, string content)
+        {
+            NetworkStream stream = client.GetStream();
+            var message = new { type = "info", content = content };
+            string jsonMessage = JsonConvert.SerializeObject(message);
+            byte[] buffer = Encoding.ASCII.GetBytes(jsonMessage + "\n");
+            stream.Write(buffer, 0, buffer.Length);
+        }
+
+        private bool CheckWin(char symbol)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                if ((board[i, 0] == symbol && board[i, 1] == symbol && board[i, 2] == symbol) ||
+                    (board[0, i] == symbol && board[1, i] == symbol && board[2, i] == symbol))
                 {
-                    toStream.Write(buffer, 0, bytesRead);
+                    return true;
                 }
             }
-            catch (Exception ex)
+
+            if ((board[0, 0] == symbol && board[1, 1] == symbol && board[2, 2] == symbol) ||
+                (board[0, 2] == symbol && board[1, 1] == symbol && board[2, 0] == symbol))
             {
-                LogMessage($"Exception: {ex.Message}");
+                return true;
             }
-            finally
+
+            return false;
+        }
+
+        private bool CheckDraw()
+        {
+            foreach (var cell in board)
             {
-                fromClient.Close();
-                toClient.Close();
-                LogMessage("Client disconnected...");
+                if (cell == '\0')
+                {
+                    return false;
+                }
             }
+            return true;
+        }
+
+        private void ResetGame()
+        {
+            Array.Clear(board, 0, board.Length);
+            currentPlayer = player1;
+            LogMessage("Game reset.");
         }
 
         private void LogMessage(string message)
@@ -185,6 +290,11 @@ namespace ClientServerGame
                 LogTextBox.AppendText($"{DateTime.Now}: {message}\n");
                 LogTextBox.ScrollToEnd();
             });
+        }
+
+        private void ServerWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            StopServer();
         }
     }
 }

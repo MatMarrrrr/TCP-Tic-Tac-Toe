@@ -24,15 +24,15 @@
             <TextBlock Text="Host a Server" FontSize="16" Margin="0,0,0,10"/>
             <TextBlock Text="Port:"/>
             <TextBox x:Name="PortTextBox" Width="200" Margin="0,0,0,10"/>
-            <Button Content="Host" Width="100" Margin="0,20,0,0" Click="HostButton_Click"/>
+            <Button Content="Host" Width="100" Margin="0,20,0,0" Click="Host_Click"/>
         </StackPanel>
         <StackPanel x:Name="ConnectPanel" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10" Visibility="Collapsed">
             <TextBlock Text="Connect to a Server" FontSize="16" Margin="0,0,0,10"/>
             <TextBlock Text="Server IP:"/>
-            <TextBox x:Name="ServerIPTextBox" Width="200" Margin="0,0,0,10"/>
+            <TextBox x:Name="ServerIPTextBox" Text="127.0.0.1" Width="200" Margin="0,0,0,10"/>
             <TextBlock Text="Port:"/>
             <TextBox x:Name="ConnectPortTextBox" Width="200" Margin="0,0,0,10"/>
-            <Button Content="Connect" Width="100" Margin="0,20,0,0"/>
+            <Button Click="Connect_Click" Content="Connect" Width="100" Margin="0,20,0,0"/>
         </StackPanel>
     </Grid>
 </Window>
