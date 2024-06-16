@@ -51,12 +51,6 @@ namespace ClientServerGame
             string ipAddress = "127.0.0.1";
             int port = int.Parse(PortTextBox.Text);
 
-            if (!IsPortAvailable(port))
-            {
-                MessageBox.Show("Port is already in use. Please choose a different port.", "Port Unavailable", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
             OpenServerWindow(ipAddress, port);
         }
 
@@ -65,54 +59,7 @@ namespace ClientServerGame
             string ipAddress = ServerIPTextBox.Text;
             int port = int.Parse(ConnectPortTextBox.Text);
 
-            if (!IsServerAvailable(port))
-            {
-                MessageBox.Show("Cannot connect to the server on the specified port. Please check the port and try again.", "Connection Failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
             OpenClientWindow(ipAddress, port);
-        }
-
-        private bool IsPortAvailable(int port)
-        {
-            bool isAvailable = true;
-
-            TcpListener listener = null;
-            try
-            {
-                listener = new TcpListener(IPAddress.Parse("127.0.0.1"), port);
-                listener.Start();
-            }
-            catch (SocketException)
-            {
-                isAvailable = false;
-            }
-            finally
-            {
-                if (listener != null)
-                {
-                    listener.Stop();
-                }
-            }
-
-            return isAvailable;
-        }
-
-        private bool IsServerAvailable(int port)
-        {
-            bool isAvailable = true;
-
-            try
-            {
-                TcpClient client = new TcpClient("127.0.0.1", port);
-            }
-            catch (SocketException)
-            {
-                isAvailable = false;
-            }
-
-            return isAvailable;
         }
     }
 }
