@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Windows;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace ClientServerGame
 {
@@ -17,6 +16,7 @@ namespace ClientServerGame
         private Queue<TcpClient> clientQueue = new Queue<TcpClient>();
         private List<GameSession> gameSessions = new List<GameSession>();
         private object lockObject = new object();
+        private bool serverStarted = true;
 
         public ServerWindow(string ipAddress, int port)
         {
@@ -49,7 +49,9 @@ namespace ClientServerGame
 
         private void StopServer()
         {
+            serverStarted = false;
             server.Stop();
+
             lock (lockObject)
             {
                 foreach (var client in clientQueue)
@@ -75,30 +77,40 @@ namespace ClientServerGame
         {
             try
             {
-                while (true)
+                while (serverStarted)
                 {
-                    TcpClient client = server.AcceptTcpClient();
-                    LogMessage($"Client connected: {client.Client.RemoteEndPoint}");
-
-                    lock (lockObject)
+                    if (server.Pending())
                     {
-                        clientQueue.Enqueue(client);
-                        if (clientQueue.Count == 1)
+                        TcpClient client = server.AcceptTcpClient();
+                        LogMessage($"Client connected: {client.Client.RemoteEndPoint}");
+
+                        lock (lockObject)
                         {
-                            SendMessage(client, new { type = "info", value = "Waiting for another player..." });
+                            clientQueue.Enqueue(client);
+                            if (clientQueue.Count == 1)
+                            {
+                                SendMessage(client, new { type = "info", value = "Waiting for another player..." });
+                            }
+                            else if (clientQueue.Count == 2)
+                            {
+                                TcpClient player1 = clientQueue.Dequeue();
+                                TcpClient player2 = clientQueue.Dequeue();
+                                StartGame(player1, player2);
+                            }
                         }
-                        else if (clientQueue.Count == 2)
-                        {
-                            TcpClient player1 = clientQueue.Dequeue();
-                            TcpClient player2 = clientQueue.Dequeue();
-                            StartGame(player1, player2);
-                        }
+                    }
+                    else
+                    {
+                        Thread.Sleep(100);
                     }
                 }
             }
             catch (SocketException ex)
             {
-                LogMessage($"SocketException: {ex.Message}");
+                if (serverStarted)
+                {
+                    LogMessage($"SocketException: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -134,7 +146,7 @@ namespace ClientServerGame
                 NetworkStream stream = client.GetStream();
                 byte[] buffer = new byte[1024];
                 int bytesRead;
-                while (!session.IsFinished)
+                while (!session.IsFinished && serverStarted)
                 {
                     bytesRead = stream.Read(buffer, 0, buffer.Length);
                     if (bytesRead != 0)
@@ -159,8 +171,8 @@ namespace ClientServerGame
                                 else if (session.CheckDraw())
                                 {
                                     SendMessage(opponent, new { type = "move", row, column, symbol });
-                                    SendMessage(client, new { type = "finish", value = $"Its a draw" });
-                                    SendMessage(opponent, new { type = "finish", value = $"Its a draw" });
+                                    SendMessage(client, new { type = "finish", value = $"It's a draw" });
+                                    SendMessage(opponent, new { type = "finish", value = $"It's a draw" });
                                 }
                                 else
                                 {
@@ -169,12 +181,11 @@ namespace ClientServerGame
                                 break;
                             case "playAgain":
                                 session.ResetGame();
-                                SendMessage(client, new { type = "reset"});
+                                SendMessage(client, new { type = "reset" });
                                 SendMessage(opponent, new { type = "reset" });
                                 SendMessage(opponent, new { type = "assign", symbol = "X", turn = true });
                                 SendMessage(client, new { type = "assign", symbol = "O", turn = false });
                                 break;
-
                         }
 
                         LogMessage($"Received message: {message}");

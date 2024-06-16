@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -71,6 +72,7 @@ namespace ClientServerGame
                         case "assign":
                             this.playerSymbol = jsonMessage.symbol;
                             bool turn = jsonMessage.turn;
+                            Dispatcher.Invoke(() => ResetButtons());
                             Dispatcher.Invoke(() => InfoTextBlock.Text = $"Assigned symbol {this.playerSymbol}");
                             string turnText = turn ? "Your turn" : "Wait for your opponent move";
                             Dispatcher.Invoke(() => TurnTextBlock.Text = turnText);
@@ -103,6 +105,13 @@ namespace ClientServerGame
                             break;
                     }
                 }
+                Dispatcher.Invoke(() => {
+                    LogMessage("The server terminated the connection");
+                    this.ConnectionInfoTextBlock.Text = $"Not connected to server";
+                    this.InfoTextBlock.Text = null;
+                    this.TurnTextBlock.Text = null;
+                });
+
             }
             catch (Exception ex)
             {
