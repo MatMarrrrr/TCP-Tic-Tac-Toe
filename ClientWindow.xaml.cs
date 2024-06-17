@@ -61,33 +61,40 @@ namespace ClientServerGame
                 {
                     string message = Encoding.ASCII.GetString(buffer, 0, bytesRead);
                     var jsonMessage = JsonConvert.DeserializeObject<dynamic>(message);
+
                     LogMessage($"Received message: {jsonMessage.ToString().Replace("\n", "").Replace("\r", "")}");
                     string messageType = jsonMessage.type;
                     switch (messageType)
                     {
                         case "info":
                             string value = jsonMessage.value;
+
                             Dispatcher.Invoke(() => LogMessage(value));
                             break;
                         case "assign":
                             this.playerSymbol = jsonMessage.symbol;
                             bool turn = jsonMessage.turn;
-                            Dispatcher.Invoke(() => ResetButtons());
-                            Dispatcher.Invoke(() => InfoTextBlock.Text = $"Assigned symbol {this.playerSymbol}");
-                            string turnText = turn ? "Your turn" : "Wait for your opponent move";
-                            Dispatcher.Invoke(() => TurnTextBlock.Text = turnText);
-                            Dispatcher.Invoke(() => SetButtonsEnabled(turn));
+
+                            Dispatcher.Invoke(() =>
+                            {
+                                ResetButtons();
+                                InfoTextBlock.Text = $"Assigned symbol {this.playerSymbol}";
+                                string turnText = turn ? "Your turn" : "Wait for your opponent move";
+                                TurnTextBlock.Text = turnText;
+                                SetButtonsEnabled(turn);
+                            });
                             break;
                         case "move":
                             int row = jsonMessage.row;
                             int column = jsonMessage.column;
                             char symbol = jsonMessage.symbol;
+
                             Dispatcher.Invoke(() =>
                             {
                                 buttons[row, column].Content = symbol;
                                 SetButtonsEnabled(true);
+                                TurnTextBlock.Text = "Your turn";
                             });
-                            Dispatcher.Invoke(() => TurnTextBlock.Text = "Your turn");
                             break;
                         case "finish":
                             string finishValue = jsonMessage.value;
@@ -103,10 +110,25 @@ namespace ClientServerGame
                                 PlayAgainButton.Visibility = Visibility.Hidden;
                             });
                             break;
+                        case "disconnected":
+                            Dispatcher.Invoke(() => {
+                                LogMessage("Your opponent has quit. Join again to find new opponent");
+                                LogMessage("The server terminated the connection");
+                                SetButtonsEnabled(false);
+                                PlayAgainButton.Visibility = Visibility.Hidden;
+                                this.ConnectionInfoTextBlock.Text = $"Not connected to server";
+                                this.InfoTextBlock.Text = null;
+                                this.TurnTextBlock.Text = null;
+                            });
+                            break;
                     }
                 }
                 Dispatcher.Invoke(() => {
+                    stream.Close();
+                    client.Close();
                     LogMessage("The server terminated the connection");
+                    SetButtonsEnabled(false);
+                    PlayAgainButton.Visibility = Visibility.Hidden;
                     this.ConnectionInfoTextBlock.Text = $"Not connected to server";
                     this.InfoTextBlock.Text = null;
                     this.TurnTextBlock.Text = null;
@@ -141,8 +163,12 @@ namespace ClientServerGame
                     column,
                     symbol = playerSymbol
                 };
-                Dispatcher.Invoke(() => {SetButtonsEnabled(false);});
-                Dispatcher.Invoke(() => TurnTextBlock.Text = "Wait for your oponent move");
+
+                Dispatcher.Invoke(() => {
+                    SetButtonsEnabled(false);
+                    TurnTextBlock.Text = "Wait for your oponent move";
+                });
+
                 SendMessageToServer(message);
             }
         }

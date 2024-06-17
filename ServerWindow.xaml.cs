@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -89,6 +90,8 @@ namespace ClientServerGame
                             clientQueue.Enqueue(client);
                             if (clientQueue.Count == 1)
                             {
+                                Thread monitorThread = new Thread(() => MonitorClientConnection(client)) { IsBackground = true };
+                                monitorThread.Start();
                                 SendMessage(client, new { type = "info", value = "Waiting for another player..." });
                             }
                             else if (clientQueue.Count == 2)
@@ -139,6 +142,41 @@ namespace ClientServerGame
             player2Thread.Start();
         }
 
+        private void MonitorClientConnection(TcpClient client)
+        {
+            try
+            {
+                NetworkStream stream = client.GetStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+
+                while (serverStarted && (bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0) ;
+
+                lock (lockObject)
+                {
+                    if (clientQueue.Contains(client))
+                    {
+                        Queue<TcpClient> newQueue = new Queue<TcpClient>(clientQueue.Where(c => c != client));
+                        clientQueue = newQueue;
+                        LogMessage($"Client disconnected: {client.Client.RemoteEndPoint}");
+                    }
+                }
+            }
+            catch
+            {
+                lock (lockObject)
+                {
+                    if (clientQueue.Contains(client))
+                    {
+                        Queue<TcpClient> newQueue = new Queue<TcpClient>(clientQueue.Where(c => c != client));
+                        clientQueue = newQueue;
+                        LogMessage($"Client disconnected: {client.Client.RemoteEndPoint}");
+                    }
+                }
+            }
+
+        }
+
         private void HandleClientCommunication(GameSession session, TcpClient client, TcpClient opponent)
         {
             try
@@ -146,55 +184,54 @@ namespace ClientServerGame
                 NetworkStream stream = client.GetStream();
                 byte[] buffer = new byte[1024];
                 int bytesRead;
-                while (!session.IsFinished && serverStarted)
+                while (!session.IsFinished && serverStarted && (bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0)
                 {
-                    bytesRead = stream.Read(buffer, 0, buffer.Length);
-                    if (bytesRead != 0)
+                    string message = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                    var jsonMessage = JsonConvert.DeserializeObject<dynamic>(message);
+                    string messageType = jsonMessage.type;
+                    switch (messageType)
                     {
-                        string message = Encoding.ASCII.GetString(buffer, 0, bytesRead);
-                        var jsonMessage = JsonConvert.DeserializeObject<dynamic>(message);
-                        string messageType = jsonMessage.type;
-                        switch (messageType)
-                        {
-                            case "move":
-                                int row = jsonMessage.row;
-                                int column = jsonMessage.column;
-                                char symbol = jsonMessage.symbol;
-                                session.MakeMove(row, column, symbol);
+                        case "move":
+                            int row = jsonMessage.row;
+                            int column = jsonMessage.column;
+                            char symbol = jsonMessage.symbol;
+                            session.MakeMove(row, column, symbol);
 
-                                if (session.CheckWin(symbol))
-                                {
-                                    SendMessage(opponent, new { type = "move", row, column, symbol });
-                                    SendMessage(client, new { type = "finish", value = symbol + " has won" });
-                                    SendMessage(opponent, new { type = "finish", value = symbol + " has won" });
-                                }
-                                else if (session.CheckDraw())
-                                {
-                                    SendMessage(opponent, new { type = "move", row, column, symbol });
-                                    SendMessage(client, new { type = "finish", value = $"It's a draw" });
-                                    SendMessage(opponent, new { type = "finish", value = $"It's a draw" });
-                                }
-                                else
-                                {
-                                    SendMessage(opponent, new { type = "move", row, column, symbol });
-                                }
-                                break;
-                            case "playAgain":
-                                session.ResetGame();
-                                SendMessage(client, new { type = "reset" });
-                                SendMessage(opponent, new { type = "reset" });
-                                SendMessage(opponent, new { type = "assign", symbol = "X", turn = true });
-                                SendMessage(client, new { type = "assign", symbol = "O", turn = false });
-                                break;
-                        }
+                            if (session.CheckWin(symbol))
+                            {
+                                SendMessage(opponent, new { type = "move", row, column, symbol });
+                                SendMessage(client, new { type = "finish", value = symbol + " has won" });
+                                SendMessage(opponent, new { type = "finish", value = symbol + " has won" });
+                            }
+                            else if (session.CheckDraw())
+                            {
+                                SendMessage(opponent, new { type = "move", row, column, symbol });
+                                SendMessage(client, new { type = "finish", value = $"It's a draw" });
+                                SendMessage(opponent, new { type = "finish", value = $"It's a draw" });
+                            }
+                            else
+                            {
+                                SendMessage(opponent, new { type = "move", row, column, symbol });
+                            }
+                            break;
+                        case "playAgain":
+                            session.ResetGame();
+                            SendMessage(client, new { type = "reset" });
+                            SendMessage(opponent, new { type = "reset" });
+                            SendMessage(opponent, new { type = "assign", symbol = "X", turn = true });
+                            SendMessage(client, new { type = "assign", symbol = "O", turn = false });
+                            break;
+                    }
 
-                        LogMessage($"Received message: {message}");
-                    }
-                    else
-                    {
-                        SendMessage(opponent, new { type = "disconnected" });
-                    }
+                    LogMessage($"Received message: {message}");
                 }
+
+                lock (lockObject)
+                {
+                    gameSessions.Remove(session);
+                }
+                SendMessage(opponent, new { type = "disconnected" });
+                
             }
             catch (Exception ex)
             {
