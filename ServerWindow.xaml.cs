@@ -90,8 +90,6 @@ namespace ClientServerGame
                             clientQueue.Enqueue(client);
                             if (clientQueue.Count == 1)
                             {
-                                Thread monitorThread = new Thread(() => MonitorClientConnection(client)) { IsBackground = true };
-                                monitorThread.Start();
                                 SendMessage(client, new { type = "info", value = "Waiting for another player..." });
                             }
                             else if (clientQueue.Count == 2)
@@ -140,41 +138,6 @@ namespace ClientServerGame
 
             player1Thread.Start();
             player2Thread.Start();
-        }
-
-        private void MonitorClientConnection(TcpClient client)
-        {
-            try
-            {
-                NetworkStream stream = client.GetStream();
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-
-                while (serverStarted && (bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0) ;
-
-                lock (lockObject)
-                {
-                    if (clientQueue.Contains(client))
-                    {
-                        Queue<TcpClient> newQueue = new Queue<TcpClient>(clientQueue.Where(c => c != client));
-                        clientQueue = newQueue;
-                        LogMessage($"Client disconnected: {client.Client.RemoteEndPoint}");
-                    }
-                }
-            }
-            catch
-            {
-                lock (lockObject)
-                {
-                    if (clientQueue.Contains(client))
-                    {
-                        Queue<TcpClient> newQueue = new Queue<TcpClient>(clientQueue.Where(c => c != client));
-                        clientQueue = newQueue;
-                        LogMessage($"Client disconnected: {client.Client.RemoteEndPoint}");
-                    }
-                }
-            }
-
         }
 
         private void HandleClientCommunication(GameSession session, TcpClient client, TcpClient opponent)
